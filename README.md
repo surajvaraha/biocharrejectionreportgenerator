@@ -1,36 +1,55 @@
-# Biochar Validation Automation Tool
+# Biochar Rejection Report Generator
 
-## Overview
-This tool automates the process of validating biochar data and generating PDFs. It runs locally on your machine.
+A robust web-based utility designed to automate the generation of partner-specific rejection reports from Biochar validation data. This tool supports multiple data formats and provides a simple, non-technical interface for generating PDF summaries of rejected batches.
 
-## Prerequisites
-This tool requires **Python 3.8+**. 
-**Good News**: The included run scripts (`run_tool.command` and `run_tool.bat`) will attempt to automatically install Python for you if it's missing!
+## 🚀 Features
 
-- **Mac**: The script will trigger the Xcode Command Line Tools installation if needed.
-- **Windows**: The script will try to use `winget` to install Python.
+- **Web Interface**: Simple and intuitive UI for uploading files and selecting report types.
+- **Multi-Format Support**: Explicit support for both **Looker Rejections** (Shambav Foundation) and **Kalki Rejections** data structures.
+- **Robust Data Processing**:
+    - **Flexible Column Matching**: Automatically handles variations in column names (extra spaces, casing, etc.).
+    - **Case-Insensitive Status**: Correct recognition of "Rejected" status regardless of case.
+    - **Missing Image Support**: Generates placeholders if image URLs are missing, ensuring no rejected row is lost.
+- **High Performance**: Optimized to handle large datasets (up to 10,000+ rows) efficiently.
+- **Partner-Specific PDFs**: Groups all rejections for a single partner into a single organized PDF.
+- **ZIP Export**: Automatically packages all generated reports into a single downloadable ZIP file.
 
-## How to Run
+## 📥 Installation & Setup
 
-### Mac / Linux
-1. Open the folder containing these files.
-2. Double-click **`run_tool.command`**.
-   - If it doesn't run, you may need to allow execution permission. Open Terminal, type `chmod +x `, drag the `run_tool.command` file into the terminal, and press Enter. Then try double-clicking again.
-3. A terminal window will open and install dependencies (the first time) and then start the server.
-4. Your browser should open automatically to `http://127.0.0.1:8000`.
+This tool is designed to be usable by anyone, even without coding knowledge.
 
-### Windows
-1. Open the folder containing these files.
-2. Double-click **`run_tool.bat`**.
-3. A command prompt will open, install dependencies (the first time), and start the server.
-4. Your browser should open automatically to `http://127.0.0.1:8000`.
+### For Windows Users
+1. Download the project folder.
+2. Double-click `run_tool.bat`.
+3. The script will automatically check for Python, set up a virtual environment, install dependencies, and launch the tool in your browser.
 
-## Using the Tool
-1. Upload your `.xlsx` or `.csv` file.
-2. Click "Upload & Process".
-3. Wait for the processing to complete (the progress bar will update).
-4. Once finished, a "Download Reports" button will appear. Click it to download a ZIP file containing all generated PDF reports.
+### For Mac Users
+1. Download the project folder.
+2. Double-click `run_tool.command`.
+3. The script will handle the environment setup and open the tool in your browser automatically.
 
-## Troubleshooting
-- **Browser doesn't open**: Manually open your browser and go to `http://127.0.0.1:8000`.
-- **Python not found**: Ensure Python is installed and added to your system PATH.
+## 📖 How to Use
+
+1. **Launch the Tool**: Run the appropriate launcher script (`.bat` or `.command`) for your system.
+2. **Select Sheet Type**: Choose between **Looker Rejections** or **Kalki Rejections** from the dropdown based on your input file.
+3. **Upload File**: Select your Excel (`.xlsx`) or CSV file.
+4. **Process**: Click "Start Processing".
+5. **Download**: Once complete, a download link for a ZIP file containing all partner PDFs will appear.
+
+## 🛠️ Technology Stack
+
+- **Backend**: FastAPI (Python)
+- **PDF Generation**: ReportLab
+- **Data Handling**: Pandas
+- **Frontend**: HTML5, Vanilla CSS, JavaScript
+
+## 📂 Project Structure
+
+- `app.py`: Web server and API endpoints.
+- `automation.py`: Core logic for data parsing and PDF generation.
+- `run_tool.bat / .command`: Automated launchers for Windows and Mac.
+- `templates/`: HTML templates for the web interface.
+- `requirements.txt`: List of Python dependencies.
+
+---
+Developed for Biochar Validation Automation.
