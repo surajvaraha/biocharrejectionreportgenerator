@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Biochar Rejection Report Generator</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary-color: #0f766e;
+            --primary-hover: #115e59;
+            --bg-color: #f0fdfa;
+            --card-bg: #ffffff;
+            --text-color: #1f2937;
+            --border-color: #e5e7eb;
+            --error-color: #ef4444;
+            --success-color: #10b981;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+        }
+
+        .container {
+            background-color: var(--card-bg);
+            padding: 2.5rem;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            width: 100%;
+            max-width: 480px;
+            text-align: center;
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+            color: var(--primary-color);
+        }
+
+        p.subtitle {
+            color: #6b7280;
+            margin-bottom: 2rem;
+            font-size: 0.95rem;
+        }
+
+        form {
+            display: flex;
+            flex-direction: column;
+            gap: 1.25rem;
+            text-align: left;
+        }
+
+        label {
+            font-weight: 500;
+            font-size: 0.9rem;
+            margin-bottom: 0.25rem;
+            display: block;
+        }
+
+        input[type="file"] {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            font-size: 0.95rem;
+            outline: none;
+            box-sizing: border-box;
+            transition: border-color 0.2s;
+        }
+
+        button {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 0.875rem;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            margin-top: 0.5rem;
+            width: 100%;
+        }
+
+        button:hover {
+            background-color: var(--primary-hover);
+        }
+
+        button:disabled {
+            background-color: #9ca3af;
+            cursor: not-allowed;
+        }
+
+        .progress-container {
+            display: none;
+            margin-top: 1.5rem;
+            text-align: left;
+        }
+
+        .progress-bar {
+            height: 8px;
+            background-color: #e5e7eb;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 0.5rem;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background-color: var(--primary-color);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .status-text {
+            font-size: 0.9rem;
+            color: #6b7280;
+        }
+
+        .result-section {
+            display: none;
+            margin-top: 1.5rem;
+            padding: 1rem;
+            background-color: #f0fdfa;
+            border: 1px solid #ccfbf1;
+            border-radius: 8px;
+        }
+
+        .btn-download {
+            display: inline-block;
+            background-color: var(--success-color);
+            color: white;
+            text-decoration: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            font-weight: 600;
+            margin-top: 0.5rem;
+        }
+
+        .error-message {
+            color: var(--error-color);
+            margin-top: 1rem;
+            display: none;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="container">
+        <h1>Biochar Rejection Report Generator</h1>
+        <p class="subtitle">Upload rejection data to generate PDF reports locally.</p>
+
+        <form id="uploadForm">
+            <div>
+                <label for="sheetType">Select Sheet Type</label>
+                <select id="sheetType" name="sheet_type"
+                    style="width: 100%; padding: 0.75rem; border: 1px solid var(--border-color); border-radius: 8px; font-size: 0.95rem; outline: none; box-sizing: border-box; margin-bottom: 1rem;">
+                    <option value="shambav">Looker Rejections</option>
+                    <option value="kalki">Kalki Rejections</option>
+                </select>
+            </div>
+            <div>
+                <label for="file">Select Data File (Excel or CSV)</label>
+                <input type="file" id="file" name="file" accept=".xlsx,.csv" required>
+            </div>
+
+            <button type="submit" id="submitBtn">Start Processing</button>
+        </form>
+
+        <div class="error-message" id="errorMessage"></div>
+
+        <div class="progress-container" id="progressContainer">
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+            <div class="status-text" id="statusText">Initialized...</div>
+        </div>
+
+        <div class="result-section" id="resultSection">
+            <p style="color: #065f46; font-weight: 600; margin-bottom: 0.5rem;">Processing Complete!</p>
+            <a href="#" class="btn-download" id="downloadBtn">Download Reports (ZIP)</a>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('uploadForm').addEventListener('submit', async function (e) {
+            e.preventDefault();
+
+            const fileInput = document.getElementById('file');
+            const sheetTypeInput = document.getElementById('sheetType');
+            const submitBtn = document.getElementById('submitBtn');
+            const progressContainer = document.getElementById('progressContainer');
+            const progressFill = document.getElementById('progressFill');
+            const statusText = document.getElementById('statusText');
+            const resultSection = document.getElementById('resultSection');
+            const downloadBtn = document.getElementById('downloadBtn');
+            const errorMessage = document.getElementById('errorMessage');
+
+            if (!fileInput.files[0]) return;
+
+            // Reset UI
+            errorMessage.style.display = 'none';
+            resultSection.style.display = 'none';
+            progressContainer.style.display = 'block';
+            submitBtn.disabled = true;
+            progressFill.style.width = '5%';
+            statusText.innerText = "Uploading file...";
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            formData.append('sheet_type', sheetTypeInput.value);
+
+            try {
+                // Upload File
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    throw new Error('Upload failed');
+                }
+
+                const data = await response.json();
+                const taskId = data.task_id;
+
+                // Poll Status
+                pollStatus(taskId);
+
+            } catch (error) {
+                showError(error.message);
+            }
+        });
+
+        async function pollStatus(taskId) {
+            const progressFill = document.getElementById('progressFill');
+            const statusText = document.getElementById('statusText');
+
+            const interval = setInterval(async () => {
+                try {
+                    const res = await fetch(`/status/${taskId}`);
+                    const statusData = await res.json();
+
+                    statusText.innerText = statusData.message || "Processing...";
+
+                    if (statusData.status === 'processing') {
+                        // Fake progress movement for UX
+                        let currentWidth = parseFloat(progressFill.style.width) || 5;
+                        if (currentWidth < 90) {
+                            progressFill.style.width = (currentWidth + 1) + '%';
+                        }
+                    } else if (statusData.status === 'complete') {
+                        clearInterval(interval);
+                        progressFill.style.width = '100%';
+                        showResult(statusData.download_url);
+                    } else if (statusData.status === 'error') {
+                        clearInterval(interval);
+                        showError(statusData.message || "An error occurred");
+                    }
+
+                } catch (e) {
+                    clearInterval(interval);
+                    showError("Connection lost");
+                }
+            }, 1000);
+        }
+
+        function showResult(url) {
+            document.getElementById('submitBtn').disabled = false;
+            document.getElementById('resultSection').style.display = 'block';
+            document.getElementById('downloadBtn').href = url;
+            document.getElementById('statusText').innerText = "Done!";
+        }
+
+        function showError(msg) {
+            document.getElementById('submitBtn').disabled = false;
+            document.getElementById('progressContainer').style.display = 'none';
+            const el = document.getElementById('errorMessage');
+            el.innerText = msg;
+            el.style.display = 'block';
+        }
+    </script>
+</body>
+
+</html>
