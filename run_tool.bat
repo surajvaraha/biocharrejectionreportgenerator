@@ -11,6 +11,7 @@ set HOST=127.0.0.1
 
 echo ======================================================
 echo   Biochar Rejection Report Generator - Windows Setup
+echo   Logs are saved to: server_app.log
 echo ======================================================
 
 :: 1. Check if Port 8000 is already in use

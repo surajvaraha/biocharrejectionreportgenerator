@@ -10,8 +10,27 @@ import uuid
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from automation import process_data_and_generate_reports
-
+import logging
 import sys
+
+# Ensure log file is deleted on startup for a fresh start
+LOG_FILE = "server_app.log"
+if os.path.exists(LOG_FILE):
+    try:
+        os.remove(LOG_FILE)
+    except:
+        pass
+
+# Configure Logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(LOG_FILE),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger("BiocharApp")
 
 # Change working directory to the directory of the executable (if frozen)
 # or the script (if running from source), to ensure relative paths work.
@@ -65,9 +84,11 @@ def run_automation_task(task_id, file_path, sheet_type='shambav'):
         task_progress[task_id] = {"status": "processing", "message": "Starting...", "percent": 0}
         
         # Run blocking automation
+        logger.info(f"Task {task_id}: Starting automation processing for {file_path}")
         success, message, file_paths = process_data_and_generate_reports(file_path, sheet_type=sheet_type, progress_callback=update_progress)
         
         if success and file_paths:
+            logger.info(f"Task {task_id}: Processing successful. Zipping {len(file_paths)} files.")
             zip_path = zip_results(task_id, file_paths)
             task_progress[task_id] = {
                 "status": "complete", 
@@ -75,9 +96,11 @@ def run_automation_task(task_id, file_path, sheet_type='shambav'):
                 "download_url": f"/download/{os.path.basename(zip_path)}"
             }
         else:
+             logger.warning(f"Task {task_id}: Processing failed or no rejections found. Message: {message}")
              task_progress[task_id] = {"status": "error", "message": message}
              
     except Exception as e:
+        logger.exception(f"Task {task_id}: Unhandled exception during processing")
         task_progress[task_id] = {"status": "error", "message": str(e)}
     finally:
         # Cleanup upload
@@ -110,6 +133,7 @@ async def process_file(
     task_progress[task_id] = {"status": "queued", "message": "Queued..."}
     
     # Start background task
+    logger.info(f"New upload received: {file.filename}, assigned task_id: {task_id}")
     background_tasks.add_task(run_automation_task, task_id, file_path, sheet_type)
     
     return {"task_id": task_id}
@@ -126,4 +150,5 @@ async def download_file(filename: str):
     return JSONResponse(status_code=404, content={"message": "File not found"})
 
 if __name__ == "__main__":
+    logger.info("Starting FastAPI server...")
     uvicorn.run(app, host="127.0.0.1", port=8000)
