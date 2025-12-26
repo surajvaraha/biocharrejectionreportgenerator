@@ -280,6 +280,9 @@
             document.getElementById('resultSection').style.display = 'block';
             document.getElementById('downloadBtn').href = url;
             document.getElementById('statusText').innerText = "Done!";
+            
+            // Auto-trigger download
+            window.location.href = url;
         }
 
         function showError(msg) {
