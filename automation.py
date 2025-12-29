@@ -1,5 +1,7 @@
 import pandas as pd
 import requests
+import concurrent.futures
+import time
 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
@@ -127,12 +129,27 @@ def create_partner_pdf(partner_name, batches, output_filename):
         rejection_rows = []
         rejection_items = batch['images']
         
+        rejection_rows = []
+        rejection_items = batch['images']
+        
+        # Parallelize Image Downloads for this batch
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            # Create a list of futures
+            future_to_item = {executor.submit(download_image, item['image']): item for item in rejection_items}
+            
+            # We want to maintain order, so we'll wait for all and then reconstruct in order
+            # Actually, `download_image` is fast enough usually, but for 200 batches parallelism helps at batch level.
+            # However, `create_partner_pdf` is called in parallel, so we can keep image download sequential HERE 
+            # OR we can parallelize here too. Deep parallelism might effectively be too much.
+            # Let's keep image download sequential PER PDF, but PDFs generated in PARALLEL. 
+            pass # Decision: Parallelize at PDF level, keep simple here for now to avoid complexity unless needed.
+
         for i in range(0, len(rejection_items), 2):
             row_items = rejection_items[i:i+2]
             row_cells = []
             
             for item in row_items:
-                # Download Image
+                # Download Image (Sequential here, but parallel across PDFs)
                 img_stream = download_image(item['image'])
                 img_flowable = None
                 if img_stream:
@@ -272,28 +289,57 @@ def process_data_and_generate_reports(file_path, sheet_type='shambav', progress_
 
     generated_files = []
     print(f"Found {len(partners)} partners with rejections. (Total Rows: {len(df)}, Errors: {errors}, No Rejections: {skipped_no_rejections})")
-    if progress_callback: progress_callback(f"Found {len(partners)} partners. Generating PDFs...")
+    if progress_callback: progress_callback(f"Found {len(partners)} partners. Generating PDFs...", percent=5)
 
     if not os.path.exists(OUTPUT_DIR):
         os.makedirs(OUTPUT_DIR)
 
     total_partners = len(partners)
-    count = 0
-    for partner, batches in partners.items():
-        count += 1
-        msg = f"Generating PDF for {partner} ({count}/{total_partners})..."
-        print(msg)
-        if progress_callback: progress_callback(msg)
-
-        safe_name = "".join([c if c.isalnum() else "_" for c in partner])
-        filename = os.path.join(OUTPUT_DIR, f"Report_{safe_name}.pdf")
-        
+    completed_count = 0
+    start_time = time.time()
+    
+    # Helper for parallel execution
+    def process_one_partner(item):
+        p_name, p_batches = item
+        safe_name = "".join([c if c.isalnum() else "_" for c in p_name])
+        f_name = os.path.join(OUTPUT_DIR, f"Report_{safe_name}.pdf")
         try:
-            result_path = create_partner_pdf(partner, batches, filename)
-            if result_path:
-                generated_files.append(result_path)
+            res_path = create_partner_pdf(p_name, p_batches, f_name)
+            return res_path
         except Exception as e:
-            print(f"Error generating PDF for {partner}: {e}")
+            print(f"Error generating PDF for {p_name}: {e}")
+            return None
+
+    # Use ThreadPoolExecutor for parallel PDF generation
+    # Adjust max_workers as needed (5-10 implies 5-10 concurrent PDF generations)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(process_one_partner, item): item for item in partners.items()}
+        
+        for future in concurrent.futures.as_completed(futures):
+            completed_count += 1
+            result = future.result()
+            if result:
+                generated_files.append(result)
+            
+            # Progress Logic
+            percent = 5 + int((completed_count / total_partners) * 90) # 5% to 95%
+            
+            # ETA Logic
+            elapsed = time.time() - start_time
+            avg_time_per_item = elapsed / completed_count
+            remaining = total_partners - completed_count
+            eta_seconds = remaining * avg_time_per_item
+            
+            # Format ETA
+            if eta_seconds < 60:
+                eta_str = f"{int(eta_seconds)}s"
+            else:
+                eta_str = f"{int(eta_seconds // 60)}m {int(eta_seconds % 60)}s"
+
+            msg = f"Generated {completed_count}/{total_partners} reports"
+            print(f"{msg}... ETA: {eta_str}")
+            if progress_callback: 
+                progress_callback(msg, percent=percent, eta=eta_str)
 
     if generated_files:
         return True, "Reports generated successfully.", generated_files

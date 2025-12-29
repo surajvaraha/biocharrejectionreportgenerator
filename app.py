@@ -77,9 +77,11 @@ def zip_results(task_id, file_paths):
     return zip_path
 
 def run_automation_task(task_id, file_path, sheet_type='shambav'):
-    def update_progress(msg):
-        task_progress[task_id]["message"] = msg
-        # Simple heuristic for percentage if possible, or just keep spinning
+    def update_progress(msg, percent=0, eta=None):
+        data = {"status": "processing", "message": msg, "percent": percent}
+        if eta:
+            data["eta"] = eta
+        task_progress[task_id] = data
     
     try:
         task_progress[task_id] = {"status": "processing", "message": "Starting...", "percent": 0}

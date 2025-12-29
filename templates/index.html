@@ -254,11 +254,16 @@
                     statusText.innerText = statusData.message || "Processing...";
 
                     if (statusData.status === 'processing') {
-                        // Fake progress movement for UX
-                        let currentWidth = parseFloat(progressFill.style.width) || 5;
-                        if (currentWidth < 90) {
-                            progressFill.style.width = (currentWidth + 1) + '%';
+                        // Use real backend percentage if available, else fallback
+                        const percent = statusData.percent || 0;
+                        progressFill.style.width = percent + '%';
+
+                        let msg = statusData.message || "Processing...";
+                        if (statusData.eta) {
+                            msg += ` (ETA: ${statusData.eta})`;
                         }
+                        statusText.innerText = msg;
+
                     } else if (statusData.status === 'complete') {
                         clearInterval(interval);
                         progressFill.style.width = '100%';
@@ -280,7 +285,7 @@
             document.getElementById('resultSection').style.display = 'block';
             document.getElementById('downloadBtn').href = url;
             document.getElementById('statusText').innerText = "Done!";
-            
+
             // Auto-trigger download
             window.location.href = url;
         }
