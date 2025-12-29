@@ -56,10 +56,6 @@ if [ -f "requirements.txt" ]; then
 fi
 
 # Open Browser (Wait a bit for server to start in background, or just open first)
-echo "Opening browser..."
-sleep 2
-open http://127.0.0.1:8000 &
-
 # Start App
-echo "Starting Biochar Rejection Report Generator on Port 8000..."
+echo "Starting Biochar Rejection Report Generator..."
 "$VENV_PYTHON" app.py

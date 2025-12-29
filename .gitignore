@@ -12,6 +12,7 @@ uploads/
 generated_reports/
 zips/
 server.log
+server_app.log
 TempDev/
 
 # System

@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from automation import process_data_and_generate_reports
 import logging
 import sys
+import socket
 
 # Ensure log file is deleted on startup for a fresh start
 LOG_FILE = "server_app.log"
@@ -149,6 +150,19 @@ async def download_file(filename: str):
         return FileResponse(file_path, filename=filename)
     return JSONResponse(status_code=404, content={"message": "File not found"})
 
+
+def find_free_port(start_port=8000):
+    port = start_port
+    while True:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(("127.0.0.1", port))
+                return port
+        except OSError:
+            port += 1
+
 if __name__ == "__main__":
-    logger.info("Starting FastAPI server...")
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    port = find_free_port()
+    print(f"Server started! Open http://127.0.0.1:{port} in your browser to start using the tool.")
+    logger.info(f"Starting FastAPI server on port {port}...")
+    uvicorn.run(app, host="127.0.0.1", port=port)
