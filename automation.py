@@ -82,8 +82,9 @@ def download_image(url):
 # ==========================================
 # 2. PDF GENERATOR
 # ==========================================
-def create_partner_pdf(partner_name, batches, output_filename):
-    """Generates a PDF for a specific partner containing all their rejected batches."""
+def create_partner_pdf(partner_name, batches, output_filename, progress_callback=None):
+    """Generates a PDF for a specific partner containing all their rejected batches.
+       Downloads all images in parallel first to speed up generation."""
     
     doc = SimpleDocTemplate(output_filename, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
     elements = []
@@ -95,6 +96,38 @@ def create_partner_pdf(partner_name, batches, output_filename):
     style_reason = ParagraphStyle('Reason', parent=styles['Normal'], textColor=colors.red, fontSize=10, leading=12)
     style_stage = ParagraphStyle('Stage', parent=styles['Normal'], textColor=colors.white, backColor=colors.darkgrey, fontSize=8, alignment=1, spaceBefore=4)
 
+    # --- 1. PRE-DOWNLOAD IMAGES IN PARALLEL ---
+    # Collect all unique image URLs for this partner
+    all_image_urls = set()
+    for batch in batches:
+        for item in batch['images']:
+            if item['image'] and isinstance(item['image'], str) and item['image'].startswith('http'):
+                all_image_urls.add(item['image'])
+    
+    image_map = {}
+    if all_image_urls:
+        total_imgs = len(all_image_urls)
+        downloaded = 0
+        if progress_callback:
+            progress_callback(f"Downloading {total_imgs} validation images for {partner_name}...", percent=None)
+
+        # Use a ThreadPool to download images concurrently
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            future_to_url = {executor.submit(download_image, url): url for url in all_image_urls}
+            for future in concurrent.futures.as_completed(future_to_url):
+                downloaded += 1
+                if progress_callback and downloaded % 5 == 0:
+                     progress_callback(f"Downloading images for {partner_name} ({downloaded}/{total_imgs})...", percent=None)
+                
+                url = future_to_url[future]
+                try:
+                    data = future.result()
+                    if data:
+                        image_map[url] = data
+                except Exception as e:
+                    print(f"Failed to download {url}: {e}")
+
+    # --- 2. BUILD PDF ---
     first_page = True
 
     for batch in batches:
@@ -129,34 +162,30 @@ def create_partner_pdf(partner_name, batches, output_filename):
         rejection_rows = []
         rejection_items = batch['images']
         
-        rejection_rows = []
-        rejection_items = batch['images']
-        
-        # Parallelize Image Downloads for this batch
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            # Create a list of futures
-            future_to_item = {executor.submit(download_image, item['image']): item for item in rejection_items}
-            
-            # We want to maintain order, so we'll wait for all and then reconstruct in order
-            # Actually, `download_image` is fast enough usually, but for 200 batches parallelism helps at batch level.
-            # However, `create_partner_pdf` is called in parallel, so we can keep image download sequential HERE 
-            # OR we can parallelize here too. Deep parallelism might effectively be too much.
-            # Let's keep image download sequential PER PDF, but PDFs generated in PARALLEL. 
-            pass # Decision: Parallelize at PDF level, keep simple here for now to avoid complexity unless needed.
-
         for i in range(0, len(rejection_items), 2):
             row_items = rejection_items[i:i+2]
             row_cells = []
             
             for item in row_items:
-                # Download Image (Sequential here, but parallel across PDFs)
-                img_stream = download_image(item['image'])
+                # Retrieve from pre-downloaded map (BytesIO needs to be fresh/seeked? 
+                # ReportLab might consume the BytesIO. Creating a copy or seeking to 0 is safer if reused.
+                # However, an image URL is typically unique per rejection entry in this context. 
+                # If reused, we must create a new BytesIO from the cached bytes.)
+                
+                img_url = item['image']
                 img_flowable = None
-                if img_stream:
-                    img_flowable = RLImage(img_stream, width=3*inch, height=2.2*inch)
+                
+                if img_url in image_map:
+                    # Create a new BytesIO from the cached data to avoid "seek" issues if reused
+                    img_data = BytesIO(image_map[img_url].getvalue())
+                    img_flowable = RLImage(img_data, width=3*inch, height=2.2*inch)
                     img_flowable.hAlign = 'CENTER'
                 else:
-                    img_flowable = Paragraph("[Image Not Found / None Provided]", styles['Normal'])
+                     # Fallback check or Not Found
+                     if not img_url:
+                          img_flowable = Paragraph("[No Image Link]", styles['Normal'])
+                     else:
+                          img_flowable = Paragraph("[Image Download Failed]", styles['Normal'])
                 
                 # Text Details
                 stage_para = Paragraph(f"STAGE: {item['stage']}", style_stage)
@@ -304,7 +333,10 @@ def process_data_and_generate_reports(file_path, sheet_type='shambav', progress_
         safe_name = "".join([c if c.isalnum() else "_" for c in p_name])
         f_name = os.path.join(OUTPUT_DIR, f"Report_{safe_name}.pdf")
         try:
-            res_path = create_partner_pdf(p_name, p_batches, f_name)
+            # Only pass progress callback if we have very few partners, otherwise it's too noisy/flickering
+            # or pass a lambda that doesn't overwrite percent
+            cb = progress_callback if len(partners) < 3 else None
+            res_path = create_partner_pdf(p_name, p_batches, f_name, progress_callback=cb)
             return res_path
         except Exception as e:
             print(f"Error generating PDF for {p_name}: {e}")
