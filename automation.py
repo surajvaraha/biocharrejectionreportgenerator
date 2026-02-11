@@ -54,11 +54,15 @@ SHEET_CONFIGS = {
             'slot': 'Facility Name'
         },
         'checks': [
-            ('Moisture is within limit', 'No', 'Wood Moisture', 'Wood Moisture Image Link', 'Moisture Rejected remarks'),
-            ('1.Process Start (Image)_Status', 'Rejected', 'Process Start', 'Process Start Image Link', '1.Process Start (Image)_Status Remark'),
-            ('2.Process Middle (Image)_Status', 'Rejected', 'Process Middle', 'Process Middle Image Link', '2.Process Middle (Image)_Status Remark'),
-            ('3.90%  (Image)_Status', 'Rejected', '90% End', '90% Done Image Link', '3.90% (Image)_Status Remark'),
-            ('4.Process End (Image)_Status', 'Rejected', 'Process End', 'Process End Image Link', '4.Process End (Image)_Status Remark')
+            ('Moisture is within limit', 'No', 'Wood Moisture 1', 'Wood Moisture Image 1', 'Moisture Rejected remarks'),
+            ('Moisture is within limit.1', 'No', 'Wood Moisture 2', 'Wood Moisture Image 2', 'Moisture Rejected remarks'),
+            ('Moisture is within limit.2', 'No', 'Wood Moisture 3', 'Wood Moisture Image 3', 'Moisture Rejected remarks'),
+            ('Moisture is within limit.3', 'No', 'Wood Moisture 4', 'Wood Moisture Image 4', 'Moisture Rejected remarks'),
+            ('Moisture is within limit.4', 'No', 'Wood Moisture 5', 'Wood Moisture Image 5', 'Moisture Rejected remarks'),
+            ('1.Process Start (Image)_Status', 'Rejected', 'Process Start', 'Process Start (Image)', '1.Process Start (Image)_Status Remark'),
+            ('2.Process Middle (Image)_Status', 'Rejected', 'Process Middle', 'Process Middle (Image)', '2.Process Middle (Image)_Status Remark'),
+            ('3.90%  (Image)_Status', 'Rejected', '90% End', '90% Done (Image)', '3.90% (Image)_Status Remark'),
+            ('4.Process End (Image)_Status', 'Rejected', 'Process End', 'Process End (Image)', '4.Process End (Image)_Status Remark')
         ]
     }
 }
@@ -234,7 +238,7 @@ def normalize_name(name):
     """Normalize string for robust column matching."""
     if not isinstance(name, str): return ""
     # Remove all whitespace and non-alphanumeric, lowercase
-    return re.sub(r'[^a-zA-Z0-0]', '', name).lower()
+    return re.sub(r'[^a-zA-Z0-9]', '', name).lower()
 
 def safe_get(row, col_name, df_cols_map):
     """Finds a column in the row using normalized name matching."""
