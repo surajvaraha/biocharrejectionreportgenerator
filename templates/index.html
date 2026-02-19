@@ -162,15 +162,7 @@
 
         <form id="uploadForm">
             <div>
-                <label for="sheetType">Select Sheet Type</label>
-                <select id="sheetType" name="sheet_type"
-                    style="width: 100%; padding: 0.75rem; border: 1px solid var(--border-color); border-radius: 8px; font-size: 0.95rem; outline: none; box-sizing: border-box; margin-bottom: 1rem;">
-                    <option value="shambav">Looker Rejections</option>
-                    <option value="kalki">Kalki Rejections</option>
-                </select>
-            </div>
-            <div>
-                <label for="file">Select Data File (Excel or CSV)</label>
+                <label for="file">Select Kalki Rejections File (Excel or CSV)</label>
                 <input type="file" id="file" name="file" accept=".xlsx,.csv" required>
             </div>
 
@@ -197,7 +189,6 @@
             e.preventDefault();
 
             const fileInput = document.getElementById('file');
-            const sheetTypeInput = document.getElementById('sheetType');
             const submitBtn = document.getElementById('submitBtn');
             const progressContainer = document.getElementById('progressContainer');
             const progressFill = document.getElementById('progressFill');
@@ -208,7 +199,6 @@
 
             if (!fileInput.files[0]) return;
 
-            // Reset UI
             errorMessage.style.display = 'none';
             resultSection.style.display = 'none';
             progressContainer.style.display = 'block';
@@ -218,7 +208,6 @@
 
             const formData = new FormData();
             formData.append('file', fileInput.files[0]);
-            formData.append('sheet_type', sheetTypeInput.value);
 
             try {
                 // Upload File

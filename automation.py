@@ -23,48 +23,27 @@ OUTPUT_DIR = "generated_reports"
 if not os.path.exists(OUTPUT_DIR):
     os.makedirs(OUTPUT_DIR)
 
-# Sheet Configurations
-SHEET_CONFIGS = {
-    'shambav': {
-        'meta_map': {
-            'partner': 'Partner Name',
-            'inventoryId': 'Inventory ID',
-            'date': 'Start Date',
-            'time': 'Start Time',
-            'kilnId': 'Kiln ID',
-            'artisan': 'Artisan Pro',
-            'slot': 'Slot'
-        },
-        'checks': [
-            ('Moisture is within limit', 'No', 'Wood Moisture', 'Wood Moisture Image', 'Moisture Rejected remarks'),
-            ('1.Process Start (Image)_Status', 'Rejected', 'Process Start', 'Process Start (Image)', '1.Process Start (Image)_Status Remark'),
-            ('2.Process Middle (Image)_Status', 'Rejected', 'Process Middle', 'Process Middle (Image)', '2.Process Middle (Image)_Status Remark'),
-            ('3.90%  (Image)_Status', 'Rejected', '90% End', ' 90%End(Image)', '3.90% (Image)_Status Remark'),
-            ('4.Process End (Image)_Status', 'Rejected', 'Process End', 'Process End (Image)', '4.Process End (Image)_Status Remark')
-        ]
+SHEET_CONFIG = {
+    'meta_map': {
+        'partner': 'Partner Name',
+        'inventoryId': 'Batch Kiln ID',
+        'date': 'Production_Start_Date',
+        'time': 'Production_Time_Date',
+        'kilnId': 'Kiln ID',
+        'artisan': 'Kiln Name',
+        'slot': 'Facility Name'
     },
-    'kalki': {
-        'meta_map': {
-            'partner': 'Partner Name',
-            'inventoryId': 'Batch_Kiln_ID', 
-            'date': 'Production_start_date',
-            'time': 'Production_time_date',
-            'kilnId': 'Kiln ID',
-            'artisan': 'Kiln Name',
-            'slot': 'Facility Name'
-        },
-        'checks': [
-            ('Moisture is within limit', 'No', 'Wood Moisture 1', 'Wood Moisture Image 1', 'Moisture Rejected remarks'),
-            ('Moisture is within limit.1', 'No', 'Wood Moisture 2', 'Wood Moisture Image 2', 'Moisture Rejected remarks'),
-            ('Moisture is within limit.2', 'No', 'Wood Moisture 3', 'Wood Moisture Image 3', 'Moisture Rejected remarks'),
-            ('Moisture is within limit.3', 'No', 'Wood Moisture 4', 'Wood Moisture Image 4', 'Moisture Rejected remarks'),
-            ('Moisture is within limit.4', 'No', 'Wood Moisture 5', 'Wood Moisture Image 5', 'Moisture Rejected remarks'),
-            ('1.Process Start (Image)_Status', 'Rejected', 'Process Start', 'Process Start (Image)', '1.Process Start (Image)_Status Remark'),
-            ('2.Process Middle (Image)_Status', 'Rejected', 'Process Middle', 'Process Middle (Image)', '2.Process Middle (Image)_Status Remark'),
-            ('3.90%  (Image)_Status', 'Rejected', '90% End', '90% Done (Image)', '3.90% (Image)_Status Remark'),
-            ('4.Process End (Image)_Status', 'Rejected', 'Process End', 'Process End (Image)', '4.Process End (Image)_Status Remark')
-        ]
-    }
+    'checks': [
+        ('Wood_Moisture.1', 'No', 'Wood Moisture 1', 'Wood Moisture Image 1', 'Moisture is within limit'),
+        ('Wood_Moisture.2', 'No', 'Wood Moisture 2', 'Wood Moisture Image 2', 'Moisture is within limit.1'),
+        ('Wood_Moisture.3', 'No', 'Wood Moisture 3', 'Wood Moisture Image 3', 'Moisture is within limit.2'),
+        ('Wood_Moisture.4', 'No', 'Wood Moisture 4', 'Wood Moisture Image 4', 'Moisture is within limit.3'),
+        ('Wood_Moisture.5', 'No', 'Wood Moisture 5', 'Wood Moisture Image 5', 'Moisture is within limit.4'),
+        ('1.Process Start (Image)_Status', 'Rejected', 'Process Start', 'Process Start (Image)', '1.Process Start (Image)_Status Remark'),
+        ('2.Process Middle (Image)_Status', 'Rejected', 'Process Middle', 'Process Middle (Image)', '2.Process Middle (Image)_Status Remark'),
+        ('3.90%  (Image)_Status', 'Rejected', '90% End', '90% Done (Image)', '3.90% (Image)_Status Remark'),
+        ('4.Process End (Image)_Status', 'Rejected', 'Process End', 'Process End (Image)', '4.Process End (Image)_Status Remark')
+    ]
 }
 
 # ==========================================
@@ -131,25 +110,15 @@ def create_partner_pdf(partner_name, batches, output_filename, progress_callback
                 except Exception as e:
                     print(f"Failed to download {url}: {e}")
 
-    # --- 2. BUILD PDF ---
-    first_page = True
-
-    for batch in batches:
-        if not first_page:
-            elements.append(PageBreak())
-        first_page = False
-        
-        # --- HEADER SECTION ---
-        meta = batch['meta']
+    def build_header(meta):
         header_data = [
-            [Paragraph('Partner Name:', style_header_lbl), Paragraph(str(meta.get('partner', '')), style_header_text), 
+            [Paragraph('Partner Name:', style_header_lbl), Paragraph(str(meta.get('partner', '')), style_header_text),
              Paragraph('Inventory/Batch ID:', style_header_lbl), Paragraph(str(meta.get('inventoryId', '')), style_header_text)],
             [Paragraph('Date / Time:', style_header_lbl), Paragraph(f"{meta.get('date', '')} {meta.get('time', '')}", style_header_text),
              Paragraph('Kiln ID:', style_header_lbl), Paragraph(str(meta.get('kilnId', '')), style_header_text)],
             [Paragraph('Artisan/Name:', style_header_lbl), Paragraph(str(meta.get('artisan', '')), style_header_text),
              Paragraph('Slot/Facility:', style_header_lbl), Paragraph(str(meta.get('slot', '')), style_header_text)],
         ]
-        
         t_header = Table(header_data, colWidths=[1.2*inch, 2.5*inch, 1.2*inch, 2.0*inch])
         t_header.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, -1), colors.whitesmoke),
@@ -157,69 +126,69 @@ def create_partner_pdf(partner_name, batches, output_filename, progress_callback
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ('PADDING', (0, 0), (-1, -1), 6),
         ]))
-        
-        elements.append(Paragraph(f"Rejection Report", styles['Heading2']))
-        elements.append(t_header)
-        elements.append(Spacer(1, 0.2*inch))
-        
-        # --- REJECTIONS SECTION (GRID) ---
-        rejection_rows = []
-        rejection_items = batch['images']
-        
-        for i in range(0, len(rejection_items), 2):
-            row_items = rejection_items[i:i+2]
-            row_cells = []
-            
-            for item in row_items:
-                # Retrieve from pre-downloaded map (BytesIO needs to be fresh/seeked? 
-                # ReportLab might consume the BytesIO. Creating a copy or seeking to 0 is safer if reused.
-                # However, an image URL is typically unique per rejection entry in this context. 
-                # If reused, we must create a new BytesIO from the cached bytes.)
-                
-                img_url = item['image']
-                img_flowable = None
-                
-                if img_url in image_map:
-                    # Create a new BytesIO from the cached data to avoid "seek" issues if reused
-                    img_data = BytesIO(image_map[img_url].getvalue())
-                    img_flowable = RLImage(img_data, width=3*inch, height=2.2*inch)
-                    img_flowable.hAlign = 'CENTER'
-                else:
-                     # Fallback check or Not Found
-                     if not img_url:
-                          img_flowable = Paragraph("[No Image Link]", styles['Normal'])
-                     else:
-                          img_flowable = Paragraph("[Image Download Failed]", styles['Normal'])
-                
-                # Text Details
-                stage_para = Paragraph(f"STAGE: {item['stage']}", style_stage)
-                reason_para = Paragraph(f"Reason: {item['reason']}", style_reason)
-                
-                cell_table = Table([[img_flowable], [stage_para], [reason_para]], colWidths=[3.1*inch])
-                cell_table.setStyle(TableStyle([
-                    ('BOX', (0,0), (-1,-1), 1, colors.lightgrey),
-                    ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-                    ('VALIGN', (0,0), (-1,-1), 'TOP'),
-                    ('BOTTOMPADDING', (0,0), (-1,-1), 10),
-                ]))
-                row_cells.append(cell_table)
-            
-            if len(row_cells) < 2:
-                row_cells.append(Spacer(1,1))
-                
-            rejection_rows.append(row_cells)
+        return t_header
 
-        if rejection_rows:
-            t_grid = Table(rejection_rows, colWidths=[3.4*inch, 3.4*inch])
-            t_grid.setStyle(TableStyle([
-                ('VALIGN', (0,0), (-1,-1), 'TOP'),
-                ('LEFTPADDING', (0,0), (-1,-1), 5),
-                ('RIGHTPADDING', (0,0), (-1,-1), 5),
-                ('TOPPADDING', (0,0), (-1,-1), 10),
-            ]))
-            elements.append(t_grid)
+    def build_image_cell(item):
+        img_url = item['image']
+        if img_url in image_map:
+            img_data = BytesIO(image_map[img_url].getvalue())
+            img_flowable = RLImage(img_data, width=3*inch, height=2.2*inch)
+            img_flowable.hAlign = 'CENTER'
+        elif not img_url:
+            img_flowable = Paragraph("[No Image Link]", styles['Normal'])
         else:
+            img_flowable = Paragraph("[Image Download Failed]", styles['Normal'])
+
+        stage_para = Paragraph(f"STAGE: {item['stage']}", style_stage)
+        reason_text = item.get('reason', '')
+        reason_para = Paragraph(f"Reason: {reason_text}", style_reason) if reason_text else Spacer(1, 1)
+
+        cell_table = Table([[img_flowable], [stage_para], [reason_para]], colWidths=[3.1*inch])
+        cell_table.setStyle(TableStyle([
+            ('BOX', (0, 0), (-1, -1), 1, colors.lightgrey),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+        ]))
+        return cell_table
+
+    def build_image_row(pair):
+        """Build a single 2-column row table from 1 or 2 rejection items."""
+        row_cells = [build_image_cell(item) for item in pair]
+        if len(row_cells) < 2:
+            row_cells.append(Spacer(1, 1))
+
+        t_row = Table([row_cells], colWidths=[3.4*inch, 3.4*inch])
+        t_row.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 5),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 5),
+            ('TOPPADDING', (0, 0), (-1, -1), 10),
+        ]))
+        return t_row
+
+    # --- 2. BUILD PDF ---
+    first_page = True
+
+    for batch in batches:
+        meta = batch['meta']
+        rejection_items = batch['images']
+
+        if not first_page:
+            elements.append(PageBreak())
+        first_page = False
+
+        elements.append(Paragraph("Rejection Report", styles['Heading2']))
+        elements.append(build_header(meta))
+        elements.append(Spacer(1, 0.2*inch))
+
+        if not rejection_items:
             elements.append(Paragraph("This batch has rejections marked but no images were found.", styles['Normal']))
+            continue
+
+        for i in range(0, len(rejection_items), 2):
+            pair = rejection_items[i:i+2]
+            elements.append(build_image_row(pair))
             
     try:
         doc.build(elements)
@@ -248,11 +217,11 @@ def safe_get(row, col_name, df_cols_map):
         return row.get(actual_col, '')
     return ''
 
-def process_data_and_generate_reports(file_path, sheet_type='shambav', progress_callback=None):
-    config = SHEET_CONFIGS.get(sheet_type, SHEET_CONFIGS['shambav'])
+def process_data_and_generate_reports(file_path, progress_callback=None):
+    config = SHEET_CONFIG
     
-    print(f"Reading data from {file_path} using mode: {sheet_type}...")
-    if progress_callback: progress_callback(f"Reading data ({sheet_type})...")
+    print(f"Reading data from {file_path}...")
+    if progress_callback: progress_callback("Reading data...")
 
     try:
         if file_path.endswith('.csv'):

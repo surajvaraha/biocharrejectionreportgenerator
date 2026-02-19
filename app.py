@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, UploadFile, File, BackgroundTasks, Form
+from fastapi import FastAPI, Request, UploadFile, File, BackgroundTasks
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -76,7 +76,7 @@ def zip_results(task_id, file_paths):
                  zipf.write(file, os.path.basename(file))
     return zip_path
 
-def run_automation_task(task_id, file_path, sheet_type='shambav'):
+def run_automation_task(task_id, file_path):
     def update_progress(msg, percent=0, eta=None):
         data = {"status": "processing", "message": msg, "percent": percent}
         if eta:
@@ -86,9 +86,8 @@ def run_automation_task(task_id, file_path, sheet_type='shambav'):
     try:
         task_progress[task_id] = {"status": "processing", "message": "Starting...", "percent": 0}
         
-        # Run blocking automation
         logger.info(f"Task {task_id}: Starting automation processing for {file_path}")
-        success, message, file_paths = process_data_and_generate_reports(file_path, sheet_type=sheet_type, progress_callback=update_progress)
+        success, message, file_paths = process_data_and_generate_reports(file_path, progress_callback=update_progress)
         
         if success and file_paths:
             logger.info(f"Task {task_id}: Processing successful. Zipping {len(file_paths)} files.")
@@ -116,8 +115,7 @@ async def read_root(request: Request):
 
 @app.post("/upload")
 async def process_file(
-    file: UploadFile = File(...), 
-    sheet_type: str = Form("shambav"),
+    file: UploadFile = File(...),
     background_tasks: BackgroundTasks = None
 ):
     if not file.filename:
@@ -132,12 +130,10 @@ async def process_file(
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
         
-    # Initialize task status
     task_progress[task_id] = {"status": "queued", "message": "Queued..."}
     
-    # Start background task
     logger.info(f"New upload received: {file.filename}, assigned task_id: {task_id}")
-    background_tasks.add_task(run_automation_task, task_id, file_path, sheet_type)
+    background_tasks.add_task(run_automation_task, task_id, file_path)
     
     return {"task_id": task_id}
 
