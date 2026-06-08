@@ -111,7 +111,7 @@ def run_automation_task(task_id, file_path):
 
 @app.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse(name="index.html", context={"request": request})
 
 @app.post("/upload")
 async def process_file(
