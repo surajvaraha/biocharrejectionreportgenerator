@@ -34,11 +34,11 @@ SHEET_CONFIG = {
         'slot': 'Facility Name'
     },
     'checks': [
-        ('Wood_Moisture.1', 'No', 'Wood Moisture 1', 'Wood Moisture Image 1', 'Moisture is within limit'),
-        ('Wood_Moisture.2', 'No', 'Wood Moisture 2', 'Wood Moisture Image 2', 'Moisture is within limit.1'),
-        ('Wood_Moisture.3', 'No', 'Wood Moisture 3', 'Wood Moisture Image 3', 'Moisture is within limit.2'),
-        ('Wood_Moisture.4', 'No', 'Wood Moisture 4', 'Wood Moisture Image 4', 'Moisture is within limit.3'),
-        ('Wood_Moisture.5', 'No', 'Wood Moisture 5', 'Wood Moisture Image 5', 'Moisture is within limit.4'),
+        ('Wood_Moisture.1', 'No', 'Wood Moisture 1', ['Wood Moisture Image 1', 'Moisture Image 1'], 'Moisture is within limit'),
+        ('Wood_Moisture.2', 'No', 'Wood Moisture 2', ['Wood Moisture Image 2', 'Moisture Image 2'], 'Moisture is within limit.1'),
+        ('Wood_Moisture.3', 'No', 'Wood Moisture 3', ['Wood Moisture Image 3', 'Moisture Image 3'], 'Moisture is within limit.2'),
+        ('Wood_Moisture.4', 'No', 'Wood Moisture 4', ['Wood Moisture Image 4', 'Moisture Image 4'], 'Moisture is within limit.3'),
+        ('Wood_Moisture.5', 'No', 'Wood Moisture 5', ['Wood Moisture Image 5', 'Moisture Image 5'], 'Moisture is within limit.4'),
         ('1.Process Start (Image)_Status', 'Rejected', 'Process Start', 'Process Start (Image)', '1.Process Start (Image)_Status Remark'),
         ('2.Process Middle (Image)_Status', 'Rejected', 'Process Middle', 'Process Middle (Image)', '2.Process Middle (Image)_Status Remark'),
         ('3.90%  (Image)_Status', 'Rejected', '90% End', '90% Done (Image)', '3.90% (Image)_Status Remark'),
@@ -210,7 +210,13 @@ def normalize_name(name):
     return re.sub(r'[^a-zA-Z0-9]', '', name).lower()
 
 def safe_get(row, col_name, df_cols_map):
-    """Finds a column in the row using normalized name matching."""
+    """Finds a column in the row using normalized name matching. Accepts a list of fallback names."""
+    if isinstance(col_name, (list, tuple)):
+        for name in col_name:
+            result = safe_get(row, name, df_cols_map)
+            if result != '':
+                return result
+        return ''
     norm_target = normalize_name(col_name)
     actual_col = df_cols_map.get(norm_target)
     if actual_col:
