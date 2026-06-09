@@ -11,27 +11,27 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from automation import process_data_and_generate_reports
 import logging
+from logging.handlers import RotatingFileHandler
 import sys
 import socket
 
-# Ensure log file is deleted on startup for a fresh start
 LOG_FILE = "server_app.log"
-if os.path.exists(LOG_FILE):
-    try:
-        os.remove(LOG_FILE)
-    except:
-        pass
 
-# Configure Logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(LOG_FILE),
-        logging.StreamHandler(sys.stdout)
-    ]
-)
+_fmt = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+_file_handler = RotatingFileHandler(LOG_FILE, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
+_file_handler.setFormatter(_fmt)
+
+_console_handler = logging.StreamHandler(sys.stdout)
+_console_handler.setFormatter(_fmt)
+
+logging.basicConfig(level=logging.INFO, handlers=[_file_handler, _console_handler])
 logger = logging.getLogger("BiocharApp")
+
+for _uv_name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+    _uv_log = logging.getLogger(_uv_name)
+    _uv_log.handlers = [_file_handler, _console_handler]
+    _uv_log.propagate = False
 
 # Change working directory to the directory of the executable (if frozen)
 # or the script (if running from source), to ensure relative paths work.

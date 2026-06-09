@@ -55,7 +55,31 @@ if [ -f "requirements.txt" ]; then
     fi
 fi
 
-# Open Browser (Wait a bit for server to start in background, or just open first)
+# Check for updates from GitHub
+echo "[INFO] Checking for updates..."
+if command -v git &>/dev/null; then
+    git fetch origin main 2>/dev/null
+    if [ $? -eq 0 ]; then
+        LOCAL_SHA=$(git rev-parse HEAD 2>/dev/null)
+        REMOTE_SHA=$(git rev-parse origin/main 2>/dev/null)
+        if [ "$LOCAL_SHA" != "$REMOTE_SHA" ]; then
+            echo "[INFO] Update found. Pulling latest changes..."
+            git pull origin main
+            if [ $? -eq 0 ]; then
+                echo "[INFO] Updated successfully."
+            else
+                echo "[WARNING] Pull failed. Continuing with current version."
+            fi
+        else
+            echo "[INFO] Already up to date."
+        fi
+    else
+        echo "[WARNING] Could not reach GitHub. Continuing without update."
+    fi
+else
+    echo "[INFO] Git not found, skipping update check."
+fi
+
 # Start App
 echo "Starting Biochar Rejection Report Generator..."
 "$VENV_PYTHON" app.py

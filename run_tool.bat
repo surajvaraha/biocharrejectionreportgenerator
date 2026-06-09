@@ -68,7 +68,33 @@ if exist "requirements.txt" (
     )
 )
 
-:: 4. Start Application
+:: 4. Auto-Update from GitHub
+echo [INFO] Checking for updates...
+where git >nul 2>&1
+if %errorlevel% == 0 (
+    git fetch origin main >nul 2>&1
+    if %errorlevel% == 0 (
+        for /f %%i in ('git rev-parse HEAD 2^>nul') do set LOCAL_SHA=%%i
+        for /f %%i in ('git rev-parse origin/main 2^>nul') do set REMOTE_SHA=%%i
+        if not "!LOCAL_SHA!"=="!REMOTE_SHA!" (
+            echo [INFO] Update found. Pulling latest changes...
+            git pull origin main
+            if %errorlevel% == 0 (
+                echo [INFO] Updated successfully.
+            ) else (
+                echo [WARNING] Pull failed. Continuing with current version.
+            )
+        ) else (
+            echo [INFO] Already up to date.
+        )
+    ) else (
+        echo [WARNING] Could not reach GitHub. Continuing without update.
+    )
+) else (
+    echo [INFO] Git not found, skipping update check.
+)
+
+:: 5. Start Application
 echo [INFO] Starting Biochar Rejection Report Generator...
 %VENV_PYTHON% app.py
 
