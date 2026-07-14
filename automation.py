@@ -5,193 +5,359 @@ import time
 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Image as RLImage, Spacer, PageBreak
+from reportlab.platypus import (
+    SimpleDocTemplate, Table, TableStyle, Paragraph, Image as RLImage,
+    Spacer, PageBreak, KeepTogether,
+)
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
+from reportlab.lib.enums import TA_LEFT, TA_CENTER
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from io import BytesIO
 import os
-import json
-import traceback
+import datetime
 import re
 
 # ==========================================
 # CONFIGURATION
 # ==========================================
 OUTPUT_DIR = "generated_reports"
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# Create output directory if it doesn't exist
-if not os.path.exists(OUTPUT_DIR):
-    os.makedirs(OUTPUT_DIR)
+# --- Varaha brand palette (see varaha-brand-guidelines) ---
+TEAL       = colors.HexColor("#07342f")
+TEAL_LIGHT = colors.HexColor("#0a4f47")
+TEAL_MID   = colors.HexColor("#3d6a64")
+AMBER      = colors.HexColor("#f9ac00")
+SAGE       = colors.HexColor("#dfedee")
+SAGE_DARK  = colors.HexColor("#c5dfe0")
+TEXT       = colors.HexColor("#545454")
+TEXT_LIGHT = colors.HexColor("#777777")
+BORDER     = colors.HexColor("#e0e0e0")
+REJECT_RED = colors.HexColor("#c0392b")
+WHITE      = colors.white
 
-SHEET_CONFIG = {
-    'meta_map': {
-        'partner': 'Partner Name',
-        'inventoryId': 'Batch Kiln ID',
-        'date': 'Production_Start_Date',
-        'time': 'Production_Time_Date',
-        'kilnId': 'Kiln ID',
-        'artisan': 'Kiln Name',
-        'slot': 'Facility Name'
-    },
-    'checks': [
-        ('Wood_Moisture.1', 'No', 'Wood Moisture 1', ['Wood Moisture Image 1', 'Moisture Image 1'], 'Moisture is within limit'),
-        ('Wood_Moisture.2', 'No', 'Wood Moisture 2', ['Wood Moisture Image 2', 'Moisture Image 2'], 'Moisture is within limit.1'),
-        ('Wood_Moisture.3', 'No', 'Wood Moisture 3', ['Wood Moisture Image 3', 'Moisture Image 3'], 'Moisture is within limit.2'),
-        ('Wood_Moisture.4', 'No', 'Wood Moisture 4', ['Wood Moisture Image 4', 'Moisture Image 4'], 'Moisture is within limit.3'),
-        ('Wood_Moisture.5', 'No', 'Wood Moisture 5', ['Wood Moisture Image 5', 'Moisture Image 5'], 'Moisture is within limit.4'),
-        ('1.Process Start (Image)_Status', 'Rejected', 'Process Start', 'Process Start (Image)', '1.Process Start (Image)_Status Remark'),
-        ('2.Process Middle (Image)_Status', 'Rejected', 'Process Middle', 'Process Middle (Image)', '2.Process Middle (Image)_Status Remark'),
-        ('3.90%  (Image)_Status', 'Rejected', '90% End', '90% Done (Image)', '3.90% (Image)_Status Remark'),
-        ('4.Process End (Image)_Status', 'Rejected', 'Process End', 'Process End (Image)', '4.Process End (Image)_Status Remark')
-    ]
+# --- Human labels + display order for stage codes coming from the DB ---
+STAGE_LABELS = {
+    "ArtisanalProcessMoisture":       "Wood Moisture",
+    "ArtisanalProcessPreStart":       "Pre-Start",
+    "ArtisanalProcessStart":          "Process Start",
+    "ArtisanalProcessMiddle":         "Process Middle",
+    "ArtisanalProcessEnd":            "Process End",
+    "ArtisanalProcessPostQuenching":  "Post-Quenching",
+    "ArtisanalProcessQuenchingVideo": "Quenching Video",
+    "ArtisanalProcessBiocharSampling": "Biochar Sampling",
 }
+STAGE_ORDER = {code: i for i, code in enumerate([
+    "ArtisanalProcessMoisture", "ArtisanalProcessPreStart", "ArtisanalProcessStart",
+    "ArtisanalProcessMiddle", "ArtisanalProcessEnd", "ArtisanalProcessPostQuenching",
+    "ArtisanalProcessQuenchingVideo", "ArtisanalProcessBiocharSampling",
+])}
+
 
 # ==========================================
-# 1. IMAGE DOWNLOADER
+# FONTS — use Inter if bundled in ./fonts, else fall back to Helvetica
+# ==========================================
+def _register_fonts():
+    font_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
+    candidates = {
+        "Inter":      "Inter-Regular.ttf",
+        "Inter-Bold": "Inter-Bold.ttf",
+        "Inter-Semi": "Inter-SemiBold.ttf",
+    }
+    try:
+        if all(os.path.exists(os.path.join(font_dir, f)) for f in candidates.values()):
+            pdfmetrics.registerFont(TTFont("Inter", os.path.join(font_dir, candidates["Inter"])))
+            pdfmetrics.registerFont(TTFont("Inter-Bold", os.path.join(font_dir, candidates["Inter-Bold"])))
+            pdfmetrics.registerFont(TTFont("Inter-Semi", os.path.join(font_dir, candidates["Inter-Semi"])))
+            return "Inter", "Inter-Bold", "Inter-Semi"
+    except Exception as e:
+        print(f"Font registration failed, falling back to Helvetica: {e}")
+    return "Helvetica", "Helvetica-Bold", "Helvetica-Bold"
+
+FONT, FONT_BOLD, FONT_SEMI = _register_fonts()
+
+
+# ==========================================
+# PARTNER NAME RESOLUTION
+# The partner name is provided by the Superset export as a `partner_name` column
+# (Superset joins charify's facilities.organization_id to the org directory). The
+# tool never touches a database — it just reads what's in the sheet, with sensible
+# fallbacks if the column is missing/blank.
+# ==========================================
+def resolve_partner_name(partner_from_sheet, org_id, facility_name):
+    p = clean_str(partner_from_sheet)
+    if p:
+        return p
+    f = clean_str(facility_name)
+    if f:
+        return f
+    key = clean_str(org_id)
+    return f"Organization {key}" if key else "Unknown Partner"
+
+
+# ==========================================
+# COLUMN MATCHING (tolerant to spacing/casing in the export)
+# ==========================================
+def normalize_name(name):
+    if not isinstance(name, str):
+        return ""
+    return re.sub(r"[^a-zA-Z0-9]", "", name).lower()
+
+def make_getter(df):
+    cols_map = {normalize_name(c): c for c in df.columns}
+    def get(row, *names, default=""):
+        for n in names:
+            actual = cols_map.get(normalize_name(n))
+            if actual is not None:
+                val = row.get(actual, default)
+                if pd.isna(val):
+                    return default
+                return val
+        return default
+    return get
+
+
+# ==========================================
+# DATE / VALUE FORMATTING
+# ==========================================
+def fmt_dt(val, with_time=True):
+    """Format dates that may arrive as datetime, pandas Timestamp, epoch, or string."""
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return ""
+    if isinstance(val, str):
+        s = val.strip()
+        if s.lower() in ("", "nan", "none", "nat"):
+            return ""
+        # Try to parse ISO-ish strings for consistent formatting; else return as-is.
+        try:
+            dt = pd.to_datetime(s)
+            return dt.strftime("%d %b %Y %H:%M" if with_time else "%d %b %Y")
+        except Exception:
+            return s
+    # numeric epoch (seconds)
+    if isinstance(val, (int, float)):
+        try:
+            dt = datetime.datetime.utcfromtimestamp(float(val))
+            return dt.strftime("%d %b %Y %H:%M" if with_time else "%d %b %Y")
+        except Exception:
+            return str(val)
+    # datetime / Timestamp
+    try:
+        return pd.to_datetime(val).strftime("%d %b %Y %H:%M" if with_time else "%d %b %Y")
+    except Exception:
+        return str(val)
+
+def clean_str(val, default=""):
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return default
+    s = str(val).strip()
+    return default if s.lower() in ("nan", "none", "") else s
+
+
+# ==========================================
+# IMAGE DOWNLOADER
 # ==========================================
 def download_image(url):
-    """Downloads an image from a URL and returns it as a BytesIO object for ReportLab."""
     try:
-        if not isinstance(url, str) or not url.startswith('http'):
+        if not isinstance(url, str) or not url.startswith("http"):
             return None
-        response = requests.get(url, timeout=10)
-        if response.status_code == 200:
-            img_data = BytesIO(response.content)
-            return img_data
+        resp = requests.get(url, timeout=15)
+        if resp.status_code == 200 and resp.content:
+            return BytesIO(resp.content)
     except Exception as e:
         print(f"Error downloading image {url}: {e}")
     return None
 
+
 # ==========================================
-# 2. PDF GENERATOR
+# PDF GENERATOR (Varaha branded)
 # ==========================================
+def _page_furniture(canvas, doc):
+    """Header band + footer drawn on every page."""
+    w, h = A4
+    canvas.saveState()
+    # Header band
+    band_h = 46
+    canvas.setFillColor(TEAL)
+    canvas.rect(0, h - band_h, w, band_h, fill=1, stroke=0)
+    # Amber accent line under the band
+    canvas.setFillColor(AMBER)
+    canvas.rect(0, h - band_h - 3, w, 3, fill=1, stroke=0)
+    # Wordmark + title
+    canvas.setFillColor(WHITE)
+    canvas.setFont(FONT_BOLD, 16)
+    canvas.drawString(30, h - 30, "VARAHA")
+    canvas.setFont(FONT, 10)
+    canvas.setFillColor(SAGE)
+    canvas.drawRightString(w - 30, h - 29, "Biochar Rejection Report")
+    # Footer
+    canvas.setStrokeColor(BORDER)
+    canvas.setLineWidth(0.5)
+    canvas.line(30, 28, w - 30, 28)
+    canvas.setFont(FONT, 7.5)
+    canvas.setFillColor(TEXT_LIGHT)
+    gen = datetime.datetime.now().strftime("%d %b %Y %H:%M")
+    canvas.drawString(30, 18, f"Generated {gen}  ·  Varaha · Confidential")
+    canvas.drawRightString(w - 30, 18, f"Page {doc.page}")
+    canvas.restoreState()
+
+
 def create_partner_pdf(partner_name, batches, output_filename, progress_callback=None):
-    """Generates a PDF for a specific partner containing all their rejected batches.
-       Downloads all images in parallel first to speed up generation."""
-    
-    doc = SimpleDocTemplate(output_filename, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
-    elements = []
+    """Generate a Varaha-branded PDF for one partner containing all rejected batches.
+       Each batch begins on its own page; its rejected images flow in a 2-column grid
+       and continue across pages as needed (handles 9+ images per batch)."""
+
+    top_margin = 62  # clear the header band
+    doc = SimpleDocTemplate(
+        output_filename, pagesize=A4,
+        rightMargin=30, leftMargin=30, topMargin=top_margin, bottomMargin=40,
+        title=f"Varaha Biochar Rejection Report - {partner_name}",
+        author="Varaha",
+    )
     styles = getSampleStyleSheet()
-    
-    # Custom Styles
-    style_header_text = ParagraphStyle('HeaderVal', parent=styles['Normal'], fontSize=9, leading=11)
-    style_header_lbl = ParagraphStyle('HeaderLbl', parent=styles['Normal'], fontSize=9, leading=11, fontName='Helvetica-Bold')
-    style_reason = ParagraphStyle('Reason', parent=styles['Normal'], textColor=colors.red, fontSize=10, leading=12)
-    style_stage = ParagraphStyle('Stage', parent=styles['Normal'], textColor=colors.white, backColor=colors.darkgrey, fontSize=8, alignment=1, spaceBefore=4)
+    st_title  = ParagraphStyle("VTitle", parent=styles["Normal"], fontName=FONT_BOLD,
+                               fontSize=18, textColor=TEAL, leading=22, spaceAfter=2)
+    st_sub    = ParagraphStyle("VSub", parent=styles["Normal"], fontName=FONT,
+                               fontSize=9.5, textColor=TEXT_LIGHT, leading=13)
+    st_lbl    = ParagraphStyle("VLbl", parent=styles["Normal"], fontName=FONT_SEMI,
+                               fontSize=8, textColor=TEAL, leading=11)
+    st_val    = ParagraphStyle("VVal", parent=styles["Normal"], fontName=FONT,
+                               fontSize=9, textColor=TEXT, leading=12)
+    st_stage  = ParagraphStyle("VStage", parent=styles["Normal"], fontName=FONT_SEMI,
+                               fontSize=8.5, textColor=WHITE, alignment=TA_CENTER, leading=12)
+    st_reason = ParagraphStyle("VReason", parent=styles["Normal"], fontName=FONT,
+                               fontSize=8.5, textColor=REJECT_RED, alignment=TA_CENTER, leading=11)
+    st_noimg  = ParagraphStyle("VNoImg", parent=styles["Normal"], fontName=FONT,
+                               fontSize=8.5, textColor=TEXT_LIGHT, alignment=TA_CENTER, leading=11)
+    st_batch  = ParagraphStyle("VBatch", parent=styles["Normal"], fontName=FONT_BOLD,
+                               fontSize=11, textColor=WHITE, leading=14)
 
-    # --- 1. PRE-DOWNLOAD IMAGES IN PARALLEL ---
-    # Collect all unique image URLs for this partner
-    all_image_urls = set()
+    # --- Pre-download all images for this partner in parallel ---
+    all_urls = set()
     for batch in batches:
-        for item in batch['images']:
-            if item['image'] and isinstance(item['image'], str) and item['image'].startswith('http'):
-                all_image_urls.add(item['image'])
-    
+        for item in batch["images"]:
+            u = item.get("image")
+            if isinstance(u, str) and u.startswith("http"):
+                all_urls.add(u)
     image_map = {}
-    if all_image_urls:
-        total_imgs = len(all_image_urls)
-        downloaded = 0
+    if all_urls:
+        total = len(all_urls)
+        done = 0
         if progress_callback:
-            progress_callback(f"Downloading {total_imgs} validation images for {partner_name}...", percent=None)
+            progress_callback(f"Downloading {total} images for {partner_name}...", percent=None)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as ex:
+            fut = {ex.submit(download_image, u): u for u in all_urls}
+            for f in concurrent.futures.as_completed(fut):
+                done += 1
+                if progress_callback and done % 5 == 0:
+                    progress_callback(f"Downloading images for {partner_name} ({done}/{total})...", percent=None)
+                data = f.result()
+                if data:
+                    image_map[fut[f]] = data
 
-        # Use a ThreadPool to download images concurrently
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-            future_to_url = {executor.submit(download_image, url): url for url in all_image_urls}
-            for future in concurrent.futures.as_completed(future_to_url):
-                downloaded += 1
-                if progress_callback and downloaded % 5 == 0:
-                     progress_callback(f"Downloading images for {partner_name} ({downloaded}/{total_imgs})...", percent=None)
-                
-                url = future_to_url[future]
-                try:
-                    data = future.result()
-                    if data:
-                        image_map[url] = data
-                except Exception as e:
-                    print(f"Failed to download {url}: {e}")
+    elements = []
 
-    def build_header(meta):
-        header_data = [
-            [Paragraph('Partner Name:', style_header_lbl), Paragraph(str(meta.get('partner', '')), style_header_text),
-             Paragraph('Inventory/Batch ID:', style_header_lbl), Paragraph(str(meta.get('inventoryId', '')), style_header_text)],
-            [Paragraph('Date / Time:', style_header_lbl), Paragraph(f"{meta.get('date', '')} {meta.get('time', '')}", style_header_text),
-             Paragraph('Kiln ID:', style_header_lbl), Paragraph(str(meta.get('kilnId', '')), style_header_text)],
-            [Paragraph('Artisan/Name:', style_header_lbl), Paragraph(str(meta.get('artisan', '')), style_header_text),
-             Paragraph('Slot/Facility:', style_header_lbl), Paragraph(str(meta.get('slot', '')), style_header_text)],
+    # --- Cover strip: partner + totals ---
+    total_batches = len(batches)
+    total_images = sum(len(b["images"]) for b in batches)
+    elements.append(Paragraph(partner_name, st_title))
+    elements.append(Paragraph(
+        f"{total_batches} rejected batch{'es' if total_batches != 1 else ''} · "
+        f"{total_images} flagged image{'s' if total_images != 1 else ''}", st_sub))
+    elements.append(Spacer(1, 10))
+
+    def info_card(meta):
+        def cell(lbl, val):
+            return [Paragraph(lbl, st_lbl), Paragraph(clean_str(val) or "—", st_val)]
+        data = [
+            cell("PARTNER", meta.get("partner")) + cell("BATCH ID", meta.get("batch_id")),
+            cell("FACILITY", meta.get("facility")) + cell("KILN", meta.get("kiln")),
+            cell("PRODUCTION DATE", meta.get("production")) + cell("VALIDATED", meta.get("validated")),
         ]
-        t_header = Table(header_data, colWidths=[1.2*inch, 2.5*inch, 1.2*inch, 2.0*inch])
-        t_header.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, -1), colors.whitesmoke),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ('PADDING', (0, 0), (-1, -1), 6),
+        t = Table(data, colWidths=[1.0*inch, 2.3*inch, 1.0*inch, 2.4*inch])
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), SAGE),
+            ("LINEBELOW", (0, 0), (-1, -2), 0.4, SAGE_DARK),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ("LINEBEFORE", (0, 0), (0, -1), 3, AMBER),
         ]))
-        return t_header
+        return t
 
-    def build_image_cell(item):
-        img_url = item['image']
-        if img_url in image_map:
-            img_data = BytesIO(image_map[img_url].getvalue())
-            img_flowable = RLImage(img_data, width=3*inch, height=2.2*inch)
-            img_flowable.hAlign = 'CENTER'
-        elif not img_url:
-            img_flowable = Paragraph("[No Image Link]", styles['Normal'])
+    def image_cell(item):
+        url = item.get("image")
+        if url in image_map:
+            img = RLImage(BytesIO(image_map[url].getvalue()), width=2.9*inch, height=2.1*inch, kind="proportional")
+            img.hAlign = "CENTER"
+            img_flow = img
+        elif not url:
+            img_flow = Paragraph("[No image link]", st_noimg)
         else:
-            img_flowable = Paragraph("[Image Download Failed]", styles['Normal'])
+            img_flow = Paragraph("[Image unavailable]", st_noimg)
 
-        stage_para = Paragraph(f"STAGE: {item['stage']}", style_stage)
-        reason_text = item.get('reason', '')
-        reason_para = Paragraph(f"Reason: {reason_text}", style_reason) if reason_text else Spacer(1, 1)
+        stage_lbl = item.get("stage", "")
+        reason = clean_str(item.get("reason"), "No reason recorded")
 
-        cell_table = Table([[img_flowable], [stage_para], [reason_para]], colWidths=[3.1*inch])
-        cell_table.setStyle(TableStyle([
-            ('BOX', (0, 0), (-1, -1), 1, colors.lightgrey),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+        stage_tbl = Table([[Paragraph(stage_lbl.upper(), st_stage)]], colWidths=[2.95*inch])
+        stage_tbl.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), TEAL),
+            ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
         ]))
-        return cell_table
 
-    def build_image_row(pair):
-        """Build a single 2-column row table from 1 or 2 rejection items."""
-        row_cells = [build_image_cell(item) for item in pair]
-        if len(row_cells) < 2:
-            row_cells.append(Spacer(1, 1))
-
-        t_row = Table([row_cells], colWidths=[3.4*inch, 3.4*inch])
-        t_row.setStyle(TableStyle([
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('LEFTPADDING', (0, 0), (-1, -1), 5),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 5),
-            ('TOPPADDING', (0, 0), (-1, -1), 10),
+        cell = Table([[img_flow], [stage_tbl], [Paragraph(reason, st_reason)]], colWidths=[3.05*inch])
+        cell.setStyle(TableStyle([
+            ("BOX", (0, 0), (-1, -1), 0.75, BORDER),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("TOPPADDING", (0, 0), (-1, 0), 6),
+            ("BOTTOMPADDING", (0, -1), (-1, -1), 8),
+            ("TOPPADDING", (0, 2), (-1, 2), 4),
         ]))
-        return t_row
+        return cell
 
-    # --- 2. BUILD PDF ---
-    first_page = True
-
+    first = True
     for batch in batches:
-        meta = batch['meta']
-        rejection_items = batch['images']
-
-        if not first_page:
+        if not first:
             elements.append(PageBreak())
-        first_page = False
+        first = False
 
-        elements.append(Paragraph("Rejection Report", styles['Heading2']))
-        elements.append(build_header(meta))
-        elements.append(Spacer(1, 0.2*inch))
+        meta = batch["meta"]
+        # Batch banner
+        banner = Table([[Paragraph(f"Batch / Kiln ID: {clean_str(meta.get('batch_id')) or '—'}", st_batch)]],
+                       colWidths=[doc.width])
+        banner.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), TEAL_MID),
+            ("LEFTPADDING", (0, 0), (-1, -1), 10),
+            ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ]))
+        elements.append(KeepTogether([banner, Spacer(1, 4), info_card(meta)]))
+        elements.append(Spacer(1, 10))
 
-        if not rejection_items:
-            elements.append(Paragraph("This batch has rejections marked but no images were found.", styles['Normal']))
+        items = batch["images"]
+        if not items:
+            elements.append(Paragraph("This batch is marked rejected but has no flagged images.", st_val))
             continue
 
-        for i in range(0, len(rejection_items), 2):
-            pair = rejection_items[i:i+2]
-            elements.append(build_image_row(pair))
-            
+        for i in range(0, len(items), 2):
+            pair = items[i:i + 2]
+            cells = [image_cell(it) for it in pair]
+            if len(cells) < 2:
+                cells.append(Spacer(1, 1))
+            row = Table([cells], colWidths=[3.4*inch, 3.4*inch])
+            row.setStyle(TableStyle([
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 4), ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ]))
+            elements.append(row)
+
     try:
-        doc.build(elements)
+        doc.build(elements, onFirstPage=_page_furniture, onLaterPages=_page_furniture)
         print(f"Successfully created: {output_filename}")
         return output_filename
     except Exception as e:
@@ -200,164 +366,137 @@ def create_partner_pdf(partner_name, batches, output_filename, progress_callback
 
 
 # ==========================================
-# 4. MAIN LOGIC
+# MAIN LOGIC
 # ==========================================
-
-def normalize_name(name):
-    """Normalize string for robust column matching."""
-    if not isinstance(name, str): return ""
-    # Remove all whitespace and non-alphanumeric, lowercase
-    return re.sub(r'[^a-zA-Z0-9]', '', name).lower()
-
-def safe_get(row, col_name, df_cols_map):
-    """Finds a column in the row using normalized name matching. Accepts a list of fallback names."""
-    if isinstance(col_name, (list, tuple)):
-        for name in col_name:
-            result = safe_get(row, name, df_cols_map)
-            if result != '':
-                return result
-        return ''
-    norm_target = normalize_name(col_name)
-    actual_col = df_cols_map.get(norm_target)
-    if actual_col:
-        return row.get(actual_col, '')
-    return ''
-
 def process_data_and_generate_reports(file_path, progress_callback=None):
-    config = SHEET_CONFIG
-    
     print(f"Reading data from {file_path}...")
-    if progress_callback: progress_callback("Reading data...")
+    if progress_callback:
+        progress_callback("Reading data...")
 
     try:
-        if file_path.endswith('.csv'):
+        if file_path.endswith(".csv"):
             df = pd.read_csv(file_path)
         else:
             df = pd.read_excel(file_path)
     except Exception as e:
         return False, f"Failed to read file: {str(e)}", []
 
-    # Basic cleanup
-    df = df.fillna('')
-    
-    # Create a mapping of normalized column names to actual column names
-    df_cols_map = {normalize_name(col): col for col in df.columns}
-    
-    partners = {}
-    print("Processing rows...")
-    if progress_callback: progress_callback(f"Processing {len(df)} rows...")
+    if df.empty:
+        return True, "The uploaded file has no rows.", []
 
+    get = make_getter(df)
+
+    # partner_key -> {"name": str, "batches": {batch_id: {"meta": {...}, "images": [...]}}}
+    partners = {}
     errors = 0
-    skipped_no_rejections = 0
-    
+
+    if progress_callback:
+        progress_callback(f"Processing {len(df)} rows...")
+
     for index, row in df.iterrows():
         try:
-            # Determine Partner Name
-            partner_col = config['meta_map']['partner']
-            partner_name = str(safe_get(row, partner_col, df_cols_map)).strip()
-            
-            if not partner_name or partner_name.lower() in ['nan', '']:
-                continue
-                
-            if partner_name not in partners:
-                partners[partner_name] = []
+            org_id = clean_str(get(row, "organization_id", "org_id"))
+            facility = clean_str(get(row, "facility_name", "facility"))
+            batch_id = clean_str(get(row, "batch_kiln_id", "batch_id", "batch kiln id"))
 
-            rejected_images = []
-            row_has_rejection_mark = False
-            
-            # Check for rejections based on config
-            for status_col, status_val, stage_name, img_col, reason_col in config['checks']:
-                actual_status = str(safe_get(row, status_col, df_cols_map)).strip().lower()
-                expected_status = str(status_val).strip().lower()
-                
-                # Check status (Case Insensitive)
-                if actual_status == expected_status:
-                    row_has_rejection_mark = True
-                    img_url = safe_get(row, img_col, df_cols_map)
-                    reason = str(safe_get(row, reason_col, df_cols_map) or 'No Reason Provided')
-                    
-                    # Store rejection (even if image is empty, we'll handle it in PDF)
-                    rejected_images.append({'stage': stage_name, 'image': img_url, 'reason': reason})
+            if not batch_id:
+                continue  # a report row must belong to a batch
 
-            if row_has_rejection_mark:
-                # Extract Meta Data
-                batch_meta = {}
-                for key, col_name in config['meta_map'].items():
-                    val = safe_get(row, col_name, df_cols_map)
-                    batch_meta[key] = str(val).strip()
-                
-                partners[partner_name].append({'meta': batch_meta, 'images': rejected_images})
-            else:
-                skipped_no_rejections += 1
-                
+            partner_sheet = clean_str(get(row, "partner_name", "organization_name", "org_name", "partner"))
+            partner_name = resolve_partner_name(partner_sheet, org_id, facility)
+            partner_key = partner_name
+
+            stage_code = clean_str(get(row, "stage_code", "ref_sub_type"))
+            stage_label = clean_str(get(row, "stage")) or STAGE_LABELS.get(stage_code, stage_code or "Stage")
+
+            image_url = clean_str(get(row, "image_url", "image", "media_url"))
+            reason = clean_str(get(row, "rejection_reason", "reason", "verification_remarks"))
+
+            if partner_key not in partners:
+                partners[partner_key] = {"name": partner_name, "batches": {}}
+
+            batches = partners[partner_key]["batches"]
+            if batch_id not in batches:
+                batches[batch_id] = {
+                    "meta": {
+                        "partner": partner_name,
+                        "facility": facility,
+                        "batch_id": batch_id,
+                        "kiln": clean_str(get(row, "kiln_name", "kiln")),
+                        "production": fmt_dt(get(row, "production_start", "production_date"), with_time=False),
+                        "validated": fmt_dt(get(row, "validated_at", "last_verified_at"), with_time=True),
+                        "status": clean_str(get(row, "batch_status", "status")),
+                    },
+                    "_sort_seen": {},
+                    "images": [],
+                }
+            batches[batch_id]["images"].append({
+                "stage": stage_label,
+                "stage_code": stage_code,
+                "image": image_url,
+                "reason": reason,
+            })
         except Exception as row_error:
             errors += 1
             print(f"Error processing row {index}: {row_error}")
             continue
 
-    generated_files = []
-    print(f"Found {len(partners)} partners with rejections. (Total Rows: {len(df)}, Errors: {errors}, No Rejections: {skipped_no_rejections})")
-    if progress_callback: progress_callback(f"Found {len(partners)} partners. Generating PDFs...", percent=5)
+    # Sort each batch's images by stage order, then flatten to the structure the PDF wants.
+    partner_payloads = {}
+    for pkey, pdata in partners.items():
+        batch_list = []
+        for bid, b in pdata["batches"].items():
+            b["images"].sort(key=lambda it: (STAGE_ORDER.get(it.get("stage_code"), 99), it.get("stage", "")))
+            batch_list.append({"meta": b["meta"], "images": b["images"]})
+        # Batches ordered by production date desc-ish (fall back to id)
+        batch_list.sort(key=lambda x: str(x["meta"].get("batch_id")))
+        partner_payloads[pdata["name"]] = batch_list
 
-    if not os.path.exists(OUTPUT_DIR):
-        os.makedirs(OUTPUT_DIR)
+    total_partners = len(partner_payloads)
+    print(f"Found {total_partners} partners with rejections "
+          f"(rows: {len(df)}, row errors: {errors}).")
+    if total_partners == 0:
+        return True, "No rejection rows found in the file.", []
 
-    total_partners = len(partners)
-    completed_count = 0
-    start_time = time.time()
-    
-    # Helper for parallel execution
-    def process_one_partner(item):
-        p_name, p_batches = item
-        safe_name = "".join([c if c.isalnum() else "_" for c in p_name])
-        f_name = os.path.join(OUTPUT_DIR, f"Report_{safe_name}.pdf")
+    if progress_callback:
+        progress_callback(f"Found {total_partners} partners. Generating PDFs...", percent=5)
+
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    generated = []
+    completed = 0
+    start = time.time()
+
+    def build_one(item):
+        name, batch_list = item
+        safe = "".join(c if c.isalnum() else "_" for c in name)[:80]
+        fpath = os.path.join(OUTPUT_DIR, f"Report_{safe}.pdf")
+        cb = progress_callback if total_partners < 3 else None
         try:
-            # Only pass progress callback if we have very few partners, otherwise it's too noisy/flickering
-            # or pass a lambda that doesn't overwrite percent
-            cb = progress_callback if len(partners) < 3 else None
-            res_path = create_partner_pdf(p_name, p_batches, f_name, progress_callback=cb)
-            return res_path
+            return create_partner_pdf(name, batch_list, fpath, progress_callback=cb)
         except Exception as e:
-            print(f"Error generating PDF for {p_name}: {e}")
+            print(f"Error generating PDF for {name}: {e}")
             return None
 
-    # Use ThreadPoolExecutor for parallel PDF generation
-    # Adjust max_workers as needed (5-10 implies 5-10 concurrent PDF generations)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-        futures = {executor.submit(process_one_partner, item): item for item in partners.items()}
-        
-        for future in concurrent.futures.as_completed(futures):
-            completed_count += 1
-            result = future.result()
-            if result:
-                generated_files.append(result)
-            
-            # Progress Logic
-            percent = 5 + int((completed_count / total_partners) * 90) # 5% to 95%
-            
-            # ETA Logic
-            elapsed = time.time() - start_time
-            avg_time_per_item = elapsed / completed_count
-            remaining = total_partners - completed_count
-            eta_seconds = remaining * avg_time_per_item
-            
-            # Format ETA
-            if eta_seconds < 60:
-                eta_str = f"{int(eta_seconds)}s"
-            else:
-                eta_str = f"{int(eta_seconds // 60)}m {int(eta_seconds % 60)}s"
-
-            msg = f"Generated {completed_count}/{total_partners} reports"
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as ex:
+        futures = {ex.submit(build_one, it): it for it in partner_payloads.items()}
+        for f in concurrent.futures.as_completed(futures):
+            completed += 1
+            res = f.result()
+            if res:
+                generated.append(res)
+            percent = 5 + int((completed / total_partners) * 90)
+            elapsed = time.time() - start
+            eta = (total_partners - completed) * (elapsed / completed) if completed else 0
+            eta_str = f"{int(eta)}s" if eta < 60 else f"{int(eta // 60)}m {int(eta % 60)}s"
+            msg = f"Generated {completed}/{total_partners} reports"
             print(f"{msg}... ETA: {eta_str}")
-            if progress_callback: 
+            if progress_callback:
                 progress_callback(msg, percent=percent, eta=eta_str)
 
-    if generated_files:
-        return True, "Reports generated successfully.", generated_files
-    else:
-        if errors > 0:
-            return True, f"Processed with {errors} row errors. No rejections found.", []
-        return True, "No rejections found in the data. No reports generated.", []
+    if generated:
+        return True, "Reports generated successfully.", generated
+    return True, "No reports were generated.", []
+
 
 if __name__ == "__main__":
     pass
