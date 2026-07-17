@@ -276,6 +276,10 @@ def create_partner_pdf(partner_name, batches, output_filename, progress_callback
             cell("FACILITY", meta.get("facility")) + cell("KILN", meta.get("kiln")),
             cell("PRODUCTION DATE", meta.get("production")) + cell("VALIDATED", meta.get("validated")),
         ]
+        # Task columns only come from the optional second upload — omit the row entirely
+        # when none of the three were populated, rather than show an all-dash row.
+        if meta.get("task_status") or meta.get("task_created") or meta.get("task_due"):
+            data.append(cell("TASK CREATED", meta.get("task_created")) + cell("TASK DUE", meta.get("task_due")))
         t = Table(data, colWidths=[1.0*inch, 2.3*inch, 1.0*inch, 2.4*inch])
         t.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, -1), SAGE),
@@ -366,9 +370,44 @@ def create_partner_pdf(partner_name, batches, output_filename, progress_callback
 
 
 # ==========================================
+# VALIDATION TASKS (optional second sheet)
+# Superset exports this separately from the rejection rows (superset_task_query.sql)
+# because the task table lives in a different database (MasterService/Regen) with no
+# cross-database join available — see superset_rejection_query.sql for why. Keyed on
+# batch_kiln_id = ref_id.
+# ==========================================
+def load_task_lookup(tasks_file_path):
+    """Build {batch_kiln_id_str: {task_status, task_created, task_due}} from the
+       optional Validation Tasks export. Returns {} if no file was given."""
+    if not tasks_file_path:
+        return {}
+    try:
+        if tasks_file_path.endswith(".csv"):
+            tdf = pd.read_csv(tasks_file_path)
+        else:
+            tdf = pd.read_excel(tasks_file_path)
+    except Exception as e:
+        print(f"Failed to read tasks file, continuing without task data: {e}")
+        return {}
+
+    tget = make_getter(tdf)
+    lookup = {}
+    for _, trow in tdf.iterrows():
+        batch_id = clean_str(tget(trow, "batch_kiln_id", "ref_id", "batch_id"))
+        if not batch_id:
+            continue
+        lookup[batch_id] = {
+            "task_status": clean_str(tget(trow, "task_status", "status")),
+            "task_created": fmt_dt(tget(trow, "task_created_at", "created_on", "created_at"), with_time=True),
+            "task_due": fmt_dt(tget(trow, "task_due_date", "due_date"), with_time=False),
+        }
+    return lookup
+
+
+# ==========================================
 # MAIN LOGIC
 # ==========================================
-def process_data_and_generate_reports(file_path, progress_callback=None):
+def process_data_and_generate_reports(file_path, progress_callback=None, tasks_file_path=None):
     print(f"Reading data from {file_path}...")
     if progress_callback:
         progress_callback("Reading data...")
@@ -385,6 +424,7 @@ def process_data_and_generate_reports(file_path, progress_callback=None):
         return True, "The uploaded file has no rows.", []
 
     get = make_getter(df)
+    task_lookup = load_task_lookup(tasks_file_path)
 
     # partner_key -> {"name": str, "batches": {batch_id: {"meta": {...}, "images": [...]}}}
     partners = {}
@@ -417,6 +457,7 @@ def process_data_and_generate_reports(file_path, progress_callback=None):
 
             batches = partners[partner_key]["batches"]
             if batch_id not in batches:
+                task_meta = task_lookup.get(batch_id, {})
                 batches[batch_id] = {
                     "meta": {
                         "partner": partner_name,
@@ -426,6 +467,9 @@ def process_data_and_generate_reports(file_path, progress_callback=None):
                         "production": fmt_dt(get(row, "production_start", "production_date"), with_time=False),
                         "validated": fmt_dt(get(row, "validated_at", "last_verified_at"), with_time=True),
                         "status": clean_str(get(row, "batch_status", "status")),
+                        "task_status": task_meta.get("task_status", ""),
+                        "task_created": task_meta.get("task_created", ""),
+                        "task_due": task_meta.get("task_due", ""),
                     },
                     "_sort_seen": {},
                     "images": [],

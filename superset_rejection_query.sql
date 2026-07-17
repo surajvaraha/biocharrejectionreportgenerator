@@ -18,7 +18,13 @@
 --     (biochar_media is shared across sites/biomass/etc.).
 --   * image_url uses the no-auth media stream endpoint (returns the JPEG directly).
 --   * Date filtering: add a Superset time-range filter on `validated_at`
---     (validation date) — or on `production_start` for production date.
+--     (validation date), `production_start` (production date), or the new
+--     `batch_created_at` (when the batch_kiln row itself was created).
+--   * `batch_created_at` is exported so it can be paired with the separate
+--     "Validation Tasks" dataset (see superset_task_query.sql) — the task table
+--     lives in MasterService's DB (Regen backend), not charify_prod, so it can't
+--     be joined here in one query. Export both sheets and merge them in the
+--     report generator tool (it accepts an optional second "Tasks" file).
 -- ============================================================================
 
 SELECT
@@ -31,6 +37,7 @@ SELECT
     bk.cycle_id             AS cycle_id,
     k.name                  AS kiln_name,
     bk.status               AS batch_status,
+    bk.created_at           AS batch_created_at,
     c.batch_start_time      AS production_start,
     c.batch_end_time        AS production_end,
     m.id                    AS media_id,

@@ -166,6 +166,11 @@
                 <input type="file" id="file" name="file" accept=".xlsx,.csv" required>
             </div>
 
+            <div>
+                <label for="tasksFile">Optional: Validation Tasks export (.xlsx or .csv)</label>
+                <input type="file" id="tasksFile" name="tasks_file" accept=".xlsx,.csv">
+            </div>
+
             <button type="submit" id="submitBtn">Start Processing</button>
         </form>
 
@@ -189,6 +194,7 @@
             e.preventDefault();
 
             const fileInput = document.getElementById('file');
+            const tasksFileInput = document.getElementById('tasksFile');
             const submitBtn = document.getElementById('submitBtn');
             const progressContainer = document.getElementById('progressContainer');
             const progressFill = document.getElementById('progressFill');
@@ -208,6 +214,9 @@
 
             const formData = new FormData();
             formData.append('file', fileInput.files[0]);
+            if (tasksFileInput.files[0]) {
+                formData.append('tasks_file', tasksFileInput.files[0]);
+            }
 
             try {
                 // Upload File
